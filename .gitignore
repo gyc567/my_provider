@@ -1,0 +1,35 @@
+# Secrets — must NEVER be committed.
+# The real PROVIDER_PRIVATE_KEY and PROVIDER_PUBLIC_KEY live in .env.
+# A safe template is in .env.example.
+.env
+.env.*
+!.env.example
+
+# Local git state / worktrees
+.git/
+.git.worktrees/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Build artifacts
+/service
+/bin/
+/dist/
+/out/
+*.exe
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go module cache (rarely inside repo, but if vendored)
+vendor/
+
+# ngrok / local proxy config sometimes ends up here
+ngrok.yml
+ngrok.cfg
