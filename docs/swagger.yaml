@@ -1,106 +1,162 @@
 basePath: /
 definitions:
-  api.APIDecimal:
+  api.ErrorResponse:
+    properties:
+      detail:
+        type: string
+      error:
+        type: string
+      request_id:
+        type: string
+    type: object
+  api.UpdatePayOutBand:
+    properties:
+      client_quote_id:
+        type: string
+      max_amount_usd:
+        type: string
+      rate:
+        type: string
+    type: object
+  api.UpdatePayOutGroup:
+    properties:
+      bands:
+        items:
+          $ref: '#/definitions/api.UpdatePayOutBand'
+        type: array
+      currency:
+        type: string
+      expiration_seconds:
+        type: integer
+      payment_method:
+        type: string
+    type: object
+  api.UpdatePayOutRequest:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/api.UpdatePayOutGroup'
+        type: array
+    type: object
+  api.UpdatePayOutResponse:
+    properties:
+      applied_at:
+        description: RFC3339
+        type: string
+      bands_published:
+        type: integer
+      expires_at:
+        description: RFC3339
+        type: string
+      groups_published:
+        type: integer
+      request_id:
+        type: string
+      status:
+        description: always "OK"
+        type: string
+    type: object
+  quoteapi.APIDecimal:
     properties:
       exponent:
         type: integer
       unscaled:
         type: integer
     type: object
-  api.ErrorResponse:
+  quoteapi.ErrorResponse:
     properties:
       error:
         type: string
     type: object
-  api.NetworkProviderQuote:
+  quoteapi.NetworkProviderQuote:
     properties:
       executable:
         type: boolean
       expiration:
         type: string
       payOutAmount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       quoteId:
-        $ref: '#/definitions/api.NetworkQuoteID'
+        $ref: '#/definitions/quoteapi.NetworkQuoteID'
       rate:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       settlement:
-        $ref: '#/definitions/api.NetworkSettlement'
+        $ref: '#/definitions/quoteapi.NetworkSettlement'
     type: object
-  api.NetworkQuoteFailure:
+  quoteapi.NetworkQuoteFailure:
     properties:
       reason:
         type: string
     type: object
-  api.NetworkQuoteID:
+  quoteapi.NetworkQuoteID:
     properties:
       providerId:
         type: integer
       quoteId:
         type: integer
     type: object
-  api.NetworkQuoteResponse:
+  quoteapi.NetworkQuoteResponse:
     properties:
       allQuotes:
         items:
-          $ref: '#/definitions/api.NetworkProviderQuote'
+          $ref: '#/definitions/quoteapi.NetworkProviderQuote'
         type: array
       result:
-        $ref: '#/definitions/api.NetworkQuoteResult'
+        $ref: '#/definitions/quoteapi.NetworkQuoteResult'
     type: object
-  api.NetworkQuoteResult:
+  quoteapi.NetworkQuoteResult:
     properties:
       failure:
-        $ref: '#/definitions/api.NetworkQuoteFailure'
+        $ref: '#/definitions/quoteapi.NetworkQuoteFailure'
       success:
-        $ref: '#/definitions/api.NetworkQuoteSuccess'
+        $ref: '#/definitions/quoteapi.NetworkQuoteSuccess'
     type: object
-  api.NetworkQuoteSuccess:
+  quoteapi.NetworkQuoteSuccess:
     properties:
       expiration:
         type: string
       payOutAmount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       quoteId:
-        $ref: '#/definitions/api.NetworkQuoteID'
+        $ref: '#/definitions/quoteapi.NetworkQuoteID'
       rate:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       settlementAmount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
     type: object
-  api.NetworkSettlement:
+  quoteapi.NetworkSettlement:
     properties:
       amount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       creditLimit:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       prefundingAmount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       totalUsed:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
     type: object
-  api.PublishResponse:
+  quoteapi.PublishResponse:
     properties:
       message:
         type: string
       published:
         type: boolean
     type: object
-  api.SwaggerBand:
+  quoteapi.SwaggerBand:
     properties:
       clientQuoteId:
         type: string
       fix:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       maxAmount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       rate:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
     type: object
-  api.SwaggerGetNetworkQuoteRequest:
+  quoteapi.SwaggerGetNetworkQuoteRequest:
     properties:
       amount:
-        $ref: '#/definitions/api.APIDecimal'
+        $ref: '#/definitions/quoteapi.APIDecimal'
       amountType:
         type: string
       payOutCurrency:
@@ -108,11 +164,11 @@ definitions:
       payOutMethod:
         type: string
     type: object
-  api.SwaggerQuoteGroup:
+  quoteapi.SwaggerQuoteGroup:
     properties:
       bands:
         items:
-          $ref: '#/definitions/api.SwaggerBand'
+          $ref: '#/definitions/quoteapi.SwaggerBand'
         type: array
       currency:
         type: string
@@ -123,22 +179,22 @@ definitions:
       timestamp:
         type: string
     type: object
-  api.SwaggerQuotesResponse:
+  quoteapi.SwaggerQuotesResponse:
     properties:
       payIn:
         items:
-          $ref: '#/definitions/api.SwaggerQuoteGroup'
+          $ref: '#/definitions/quoteapi.SwaggerQuoteGroup'
         type: array
       payOut:
         items:
-          $ref: '#/definitions/api.SwaggerQuoteGroup'
+          $ref: '#/definitions/quoteapi.SwaggerQuoteGroup'
         type: array
     type: object
-  api.SwaggerUpdateQuotesRequest:
+  quoteapi.SwaggerUpdateQuotesRequest:
     properties:
       groups:
         items:
-          $ref: '#/definitions/api.SwaggerQuoteGroup'
+          $ref: '#/definitions/quoteapi.SwaggerQuoteGroup'
         type: array
     type: object
 host: api.agtpay.xyz
@@ -156,15 +212,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.SwaggerQuotesResponse'
+            $ref: '#/definitions/quoteapi.SwaggerQuotesResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get stored quote snapshots
@@ -180,26 +236,26 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.SwaggerGetNetworkQuoteRequest'
+          $ref: '#/definitions/quoteapi.SwaggerGetNetworkQuoteRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.NetworkQuoteResponse'
+            $ref: '#/definitions/quoteapi.NetworkQuoteResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get a real-time network quote
@@ -215,14 +271,54 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.SwaggerUpdateQuotesRequest'
+          $ref: '#/definitions/quoteapi.SwaggerUpdateQuotesRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PublishResponse'
+            $ref: '#/definitions/quoteapi.PublishResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/quoteapi.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/quoteapi.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/quoteapi.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update pay-in quotes
+      tags:
+      - quotes
+  /api/v1/quotes/pay-out:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Optional idempotency key; if omitted, one is derived from the
+          body hash
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Pay-out quote groups
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdatePayOutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.UpdatePayOutResponse'
         "400":
           description: Bad Request
           schema:
@@ -231,16 +327,27 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/api.ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "504":
+          description: Gateway Timeout
           schema:
             $ref: '#/definitions/api.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Update pay-in quotes
+      summary: Push pay-out quotes to the network
       tags:
       - quotes
-  /api/v1/quotes/pay-out:
     put:
       consumes:
       - application/json
@@ -250,26 +357,26 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/api.SwaggerUpdateQuotesRequest'
+          $ref: '#/definitions/quoteapi.SwaggerUpdateQuotesRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PublishResponse'
+            $ref: '#/definitions/quoteapi.PublishResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Update pay-out quotes
@@ -283,15 +390,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PublishResponse'
+            $ref: '#/definitions/quoteapi.PublishResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Publish quotes to the network
@@ -305,15 +412,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PublishResponse'
+            $ref: '#/definitions/quoteapi.PublishResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Publish quotes to the network
@@ -327,15 +434,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PublishResponse'
+            $ref: '#/definitions/quoteapi.PublishResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/quoteapi.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Publish quotes to the network

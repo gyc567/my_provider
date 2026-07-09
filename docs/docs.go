@@ -33,19 +33,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.SwaggerQuotesResponse"
+                            "$ref": "#/definitions/quoteapi.SwaggerQuotesResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -75,7 +75,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.SwaggerGetNetworkQuoteRequest"
+                            "$ref": "#/definitions/quoteapi.SwaggerGetNetworkQuoteRequest"
                         }
                     }
                 ],
@@ -83,25 +83,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.NetworkQuoteResponse"
+                            "$ref": "#/definitions/quoteapi.NetworkQuoteResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -131,7 +131,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.SwaggerUpdateQuotesRequest"
+                            "$ref": "#/definitions/quoteapi.SwaggerUpdateQuotesRequest"
                         }
                     }
                 ],
@@ -139,25 +139,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PublishResponse"
+                            "$ref": "#/definitions/quoteapi.PublishResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -187,7 +187,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.SwaggerUpdateQuotesRequest"
+                            "$ref": "#/definitions/quoteapi.SwaggerUpdateQuotesRequest"
                         }
                     }
                 ],
@@ -195,7 +195,67 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PublishResponse"
+                            "$ref": "#/definitions/quoteapi.PublishResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quotes"
+                ],
+                "summary": "Push pay-out quotes to the network",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Optional idempotency key; if omitted, one is derived from the body hash",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Pay-out quote groups",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdatePayOutRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdatePayOutResponse"
                         }
                     },
                     "400": {
@@ -210,8 +270,26 @@ const docTemplate = `{
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
@@ -237,19 +315,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PublishResponse"
+                            "$ref": "#/definitions/quoteapi.PublishResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -273,19 +351,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PublishResponse"
+                            "$ref": "#/definitions/quoteapi.PublishResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -309,19 +387,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PublishResponse"
+                            "$ref": "#/definitions/quoteapi.PublishResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/quoteapi.ErrorResponse"
                         }
                     }
                 }
@@ -329,7 +407,92 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.APIDecimal": {
+        "api.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.UpdatePayOutBand": {
+            "type": "object",
+            "properties": {
+                "client_quote_id": {
+                    "type": "string"
+                },
+                "max_amount_usd": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.UpdatePayOutGroup": {
+            "type": "object",
+            "properties": {
+                "bands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.UpdatePayOutBand"
+                    }
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "expiration_seconds": {
+                    "type": "integer"
+                },
+                "payment_method": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.UpdatePayOutRequest": {
+            "type": "object",
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.UpdatePayOutGroup"
+                    }
+                }
+            }
+        },
+        "api.UpdatePayOutResponse": {
+            "type": "object",
+            "properties": {
+                "applied_at": {
+                    "description": "RFC3339",
+                    "type": "string"
+                },
+                "bands_published": {
+                    "type": "integer"
+                },
+                "expires_at": {
+                    "description": "RFC3339",
+                    "type": "string"
+                },
+                "groups_published": {
+                    "type": "integer"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "always \"OK\"",
+                    "type": "string"
+                }
+            }
+        },
+        "quoteapi.APIDecimal": {
             "type": "object",
             "properties": {
                 "exponent": {
@@ -340,7 +503,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ErrorResponse": {
+        "quoteapi.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -348,7 +511,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.NetworkProviderQuote": {
+        "quoteapi.NetworkProviderQuote": {
             "type": "object",
             "properties": {
                 "executable": {
@@ -358,20 +521,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "payOutAmount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "quoteId": {
-                    "$ref": "#/definitions/api.NetworkQuoteID"
+                    "$ref": "#/definitions/quoteapi.NetworkQuoteID"
                 },
                 "rate": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "settlement": {
-                    "$ref": "#/definitions/api.NetworkSettlement"
+                    "$ref": "#/definitions/quoteapi.NetworkSettlement"
                 }
             }
         },
-        "api.NetworkQuoteFailure": {
+        "quoteapi.NetworkQuoteFailure": {
             "type": "object",
             "properties": {
                 "reason": {
@@ -379,7 +542,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.NetworkQuoteID": {
+        "quoteapi.NetworkQuoteID": {
             "type": "object",
             "properties": {
                 "providerId": {
@@ -390,69 +553,69 @@ const docTemplate = `{
                 }
             }
         },
-        "api.NetworkQuoteResponse": {
+        "quoteapi.NetworkQuoteResponse": {
             "type": "object",
             "properties": {
                 "allQuotes": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.NetworkProviderQuote"
+                        "$ref": "#/definitions/quoteapi.NetworkProviderQuote"
                     }
                 },
                 "result": {
-                    "$ref": "#/definitions/api.NetworkQuoteResult"
+                    "$ref": "#/definitions/quoteapi.NetworkQuoteResult"
                 }
             }
         },
-        "api.NetworkQuoteResult": {
+        "quoteapi.NetworkQuoteResult": {
             "type": "object",
             "properties": {
                 "failure": {
-                    "$ref": "#/definitions/api.NetworkQuoteFailure"
+                    "$ref": "#/definitions/quoteapi.NetworkQuoteFailure"
                 },
                 "success": {
-                    "$ref": "#/definitions/api.NetworkQuoteSuccess"
+                    "$ref": "#/definitions/quoteapi.NetworkQuoteSuccess"
                 }
             }
         },
-        "api.NetworkQuoteSuccess": {
+        "quoteapi.NetworkQuoteSuccess": {
             "type": "object",
             "properties": {
                 "expiration": {
                     "type": "string"
                 },
                 "payOutAmount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "quoteId": {
-                    "$ref": "#/definitions/api.NetworkQuoteID"
+                    "$ref": "#/definitions/quoteapi.NetworkQuoteID"
                 },
                 "rate": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "settlementAmount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 }
             }
         },
-        "api.NetworkSettlement": {
+        "quoteapi.NetworkSettlement": {
             "type": "object",
             "properties": {
                 "amount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "creditLimit": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "prefundingAmount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "totalUsed": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 }
             }
         },
-        "api.PublishResponse": {
+        "quoteapi.PublishResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -463,28 +626,28 @@ const docTemplate = `{
                 }
             }
         },
-        "api.SwaggerBand": {
+        "quoteapi.SwaggerBand": {
             "type": "object",
             "properties": {
                 "clientQuoteId": {
                     "type": "string"
                 },
                 "fix": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "maxAmount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "rate": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 }
             }
         },
-        "api.SwaggerGetNetworkQuoteRequest": {
+        "quoteapi.SwaggerGetNetworkQuoteRequest": {
             "type": "object",
             "properties": {
                 "amount": {
-                    "$ref": "#/definitions/api.APIDecimal"
+                    "$ref": "#/definitions/quoteapi.APIDecimal"
                 },
                 "amountType": {
                     "type": "string"
@@ -497,13 +660,13 @@ const docTemplate = `{
                 }
             }
         },
-        "api.SwaggerQuoteGroup": {
+        "quoteapi.SwaggerQuoteGroup": {
             "type": "object",
             "properties": {
                 "bands": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.SwaggerBand"
+                        "$ref": "#/definitions/quoteapi.SwaggerBand"
                     }
                 },
                 "currency": {
@@ -520,30 +683,30 @@ const docTemplate = `{
                 }
             }
         },
-        "api.SwaggerQuotesResponse": {
+        "quoteapi.SwaggerQuotesResponse": {
             "type": "object",
             "properties": {
                 "payIn": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.SwaggerQuoteGroup"
+                        "$ref": "#/definitions/quoteapi.SwaggerQuoteGroup"
                     }
                 },
                 "payOut": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.SwaggerQuoteGroup"
+                        "$ref": "#/definitions/quoteapi.SwaggerQuoteGroup"
                     }
                 }
             }
         },
-        "api.SwaggerUpdateQuotesRequest": {
+        "quoteapi.SwaggerUpdateQuotesRequest": {
             "type": "object",
             "properties": {
                 "groups": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.SwaggerQuoteGroup"
+                        "$ref": "#/definitions/quoteapi.SwaggerQuoteGroup"
                     }
                 }
             }

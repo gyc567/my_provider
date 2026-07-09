@@ -1,5 +1,5 @@
-// Package api exposes the frontend REST API for quote management.
-package api
+// Package quoteapi exposes the frontend REST API for quote management.
+package quoteapi
 
 import (
 	"context"

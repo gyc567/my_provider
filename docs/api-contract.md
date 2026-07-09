@@ -51,6 +51,58 @@ POST /api/v1/quotes/network
 }
 ```
 
+### 1.3 远程 pay-out push 端点（带幂等、限流、错误映射）
+
+```text
+POST /api/v1/quotes/pay-out
+```
+
+这是远程版本已经实现的生产级 pay-out 推送端点，**直接调 t-0 Network 的 `UpdateQuote`**，不经过本地 SQLite。
+
+| 位置 | 参数名 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| header | `Authorization` | string | 是 | `Bearer <apiKey>` |
+| header | `Idempotency-Key` | string | 否 | 可选幂等键；不传则根据 body hash 自动生成 |
+| body | `groups` | array | 是 | 完整的 pay-out 报价快照（会原子替换上游已有快照） |
+
+`groups[].UpdatePayOutGroup`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `currency` | string | 是 | ISO 4217 3 位大写，业务白名单，如 `EUR`、`GBP` |
+| `payment_method` | string | 是 | 短枚举：`SEPA`、`SWIFT`、`ACH`、`WIRE`、`FPS`、`G_CASH`、`INDIAN_BANK_TRANSFER`、`PESONET`、`INSTAPAY`、`PAKISTAN_BANK_TRANSFER`、`PAKISTAN_MOBILE_WALLET`、`PIX`、`AFRICAN_MOBILE_MONEY`、`CNAPS`、`NIP`、`M_PESA` |
+| `expiration_seconds` | integer | 是 | 报价有效期秒数，范围 `[5, 300]` |
+| `bands` | array | 是 | 报价档位 |
+
+`bands[].UpdatePayOutBand`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `client_quote_id` | string | 是 | 档位唯一 ID |
+| `max_amount_usd` | string | 是 | 最大金额（USD），必须是 `1000`、`5000`、`10000`、`25000`、`250000`、`1000000` 之一 |
+| `rate` | string | 是 | 汇率字符串，如 `"0.86"`；最多 8 位小数 |
+
+示例 body：
+
+```json
+{
+  "groups": [
+    {
+      "currency": "EUR",
+      "payment_method": "SEPA",
+      "expiration_seconds": 30,
+      "bands": [
+        {
+          "client_quote_id": "eur-sepa-1k",
+          "max_amount_usd": "1000",
+          "rate": "0.86"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ---
 
 ## 2. 成功响应 body schema
@@ -131,7 +183,29 @@ POST /api/v1/quotes/network
 | `totalUsed` | Decimal | 是 | 已用额度 |
 | `prefundingAmount` | Decimal | 是 | 还需预充值金额 |
 
-### 2.3 `GetQuoteResponse` 完整字段（来自 t-0 SDK 源码）
+### 2.3 `POST /api/v1/quotes/pay-out` 响应
+
+```json
+{
+  "status": "OK",
+  "applied_at": "2099-01-01T00:00:00.000000000Z",
+  "expires_at": "2099-01-01T00:00:30.000000000Z",
+  "groups_published": 1,
+  "bands_published": 1,
+  "request_id": "req_xxx"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `status` | string | 是 | 固定为 `"OK"` |
+| `applied_at` | string | 是 | 应用时间，RFC3339Nano |
+| `expires_at` | string | 是 | 最晚过期时间，RFC3339Nano |
+| `groups_published` | integer | 是 | 发布的 group 数量 |
+| `bands_published` | integer | 是 | 发布的 band 数量 |
+| `request_id` | string | 否 | 请求 ID |
+
+### 2.4 `GetQuoteResponse` 完整字段（来自 t-0 SDK 源码）
 
 `POST /api/v1/quotes/network` 直接透传 t-0 的 `GetQuoteResponse`。下面是 SDK (`provider-sdk-go@v0.19.0`) 里的真实字段定义。
 
@@ -244,7 +318,30 @@ POST /api/v1/quotes/network
 | 500 | 数据库/发布失败 |
 | 502 | 调用 t-0 network 失败 |
 
-### 3.2 t-0 Network 业务失败
+### 3.2 远程 pay-out push 端点错误
+
+`POST /api/v1/quotes/pay-out` 的错误响应也是用 HTTP status code 表示，body 形状为：
+
+```json
+{
+  "error": "invalid_request",
+  "detail": "groups is required and must be non-empty",
+  "request_id": "req_xxx"
+}
+```
+
+常见状态码与错误码：
+
+| 状态码 | `error` 字段值 | 场景 |
+|---|---|---|
+| 400 | `invalid_request` / `invalid_currency` / `invalid_payment_method` / `invalid_expiration` | 请求体校验失败 |
+| 401 | `unauthorized` | `Authorization` 缺失或错误 |
+| 409 | `idempotency_conflict` / `client_quote_id_conflict` | 幂等键冲突或 client_quote_id 重复 |
+| 422 | `rejected_by_network` | 上游拒绝（如 unsupported band） |
+| 502 | `upstream_error` | 上游网络/鉴权错误 |
+| 504 | `upstream_timeout` / `upstream_canceled` | 调用上游超时 |
+
+### 3.3 t-0 Network 业务失败
 
 `POST /api/v1/quotes/network` 如果 t-0 返回业务失败，HTTP 状态码仍是 200，body 中：
 
@@ -278,7 +375,9 @@ POST /api/v1/quotes/network
 - **是否和 `HttpT0Client.updateQuote` 的 apiKey 相同**：
   - **不是同一个**。`Authorization: Bearer <key>` 是**本地 provider API** 的鉴权 key（`PROVIDER_API_KEYS`）。
   - `HttpT0Client.updateQuote` 如果直接调的是 t-0 Network 端点，用的是 t-0 网络层鉴权，两者概念不同。
-- **是否需要 `Idempotency-Key`**：不需要，Swagger/源码里都没列。
+- **是否需要 `Idempotency-Key`**：
+  - `POST /api/v1/quotes/pay-out`：可选，推荐带上以防止重复提交。
+  - 其他 `/api/v1/quotes/*` 端点：不需要。
 
 ---
 

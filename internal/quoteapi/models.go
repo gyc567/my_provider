@@ -1,4 +1,4 @@
-package api
+package quoteapi
 
 import "my-provider/internal/quote"
 
