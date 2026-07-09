@@ -1,0 +1,349 @@
+basePath: /
+definitions:
+  api.APIDecimal:
+    properties:
+      exponent:
+        type: integer
+      unscaled:
+        type: integer
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  api.NetworkProviderQuote:
+    properties:
+      executable:
+        type: boolean
+      expiration:
+        type: string
+      payOutAmount:
+        $ref: '#/definitions/api.APIDecimal'
+      quoteId:
+        $ref: '#/definitions/api.NetworkQuoteID'
+      rate:
+        $ref: '#/definitions/api.APIDecimal'
+      settlement:
+        $ref: '#/definitions/api.NetworkSettlement'
+    type: object
+  api.NetworkQuoteFailure:
+    properties:
+      reason:
+        type: string
+    type: object
+  api.NetworkQuoteID:
+    properties:
+      providerId:
+        type: integer
+      quoteId:
+        type: integer
+    type: object
+  api.NetworkQuoteResponse:
+    properties:
+      allQuotes:
+        items:
+          $ref: '#/definitions/api.NetworkProviderQuote'
+        type: array
+      result:
+        $ref: '#/definitions/api.NetworkQuoteResult'
+    type: object
+  api.NetworkQuoteResult:
+    properties:
+      failure:
+        $ref: '#/definitions/api.NetworkQuoteFailure'
+      success:
+        $ref: '#/definitions/api.NetworkQuoteSuccess'
+    type: object
+  api.NetworkQuoteSuccess:
+    properties:
+      expiration:
+        type: string
+      payOutAmount:
+        $ref: '#/definitions/api.APIDecimal'
+      quoteId:
+        $ref: '#/definitions/api.NetworkQuoteID'
+      rate:
+        $ref: '#/definitions/api.APIDecimal'
+      settlementAmount:
+        $ref: '#/definitions/api.APIDecimal'
+    type: object
+  api.NetworkSettlement:
+    properties:
+      amount:
+        $ref: '#/definitions/api.APIDecimal'
+      creditLimit:
+        $ref: '#/definitions/api.APIDecimal'
+      prefundingAmount:
+        $ref: '#/definitions/api.APIDecimal'
+      totalUsed:
+        $ref: '#/definitions/api.APIDecimal'
+    type: object
+  api.PublishResponse:
+    properties:
+      message:
+        type: string
+      published:
+        type: boolean
+    type: object
+  api.SwaggerBand:
+    properties:
+      clientQuoteId:
+        type: string
+      fix:
+        $ref: '#/definitions/api.APIDecimal'
+      maxAmount:
+        $ref: '#/definitions/api.APIDecimal'
+      rate:
+        $ref: '#/definitions/api.APIDecimal'
+    type: object
+  api.SwaggerGetNetworkQuoteRequest:
+    properties:
+      amount:
+        $ref: '#/definitions/api.APIDecimal'
+      amountType:
+        type: string
+      payOutCurrency:
+        type: string
+      payOutMethod:
+        type: string
+    type: object
+  api.SwaggerQuoteGroup:
+    properties:
+      bands:
+        items:
+          $ref: '#/definitions/api.SwaggerBand'
+        type: array
+      currency:
+        type: string
+      expiration:
+        type: string
+      paymentMethod:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  api.SwaggerQuotesResponse:
+    properties:
+      payIn:
+        items:
+          $ref: '#/definitions/api.SwaggerQuoteGroup'
+        type: array
+      payOut:
+        items:
+          $ref: '#/definitions/api.SwaggerQuoteGroup'
+        type: array
+    type: object
+  api.SwaggerUpdateQuotesRequest:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/api.SwaggerQuoteGroup'
+        type: array
+    type: object
+host: api.agtpay.xyz
+info:
+  contact: {}
+  description: Quote management REST API for the t-0 Network provider.
+  title: my-provider API
+  version: "1.0"
+paths:
+  /api/v1/quotes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SwaggerQuotesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get stored quote snapshots
+      tags:
+      - quotes
+  /api/v1/quotes/network:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Network quote request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SwaggerGetNetworkQuoteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.NetworkQuoteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a real-time network quote
+      tags:
+      - quotes
+  /api/v1/quotes/pay-in:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pay-in quote groups
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SwaggerUpdateQuotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PublishResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update pay-in quotes
+      tags:
+      - quotes
+  /api/v1/quotes/pay-out:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pay-out quote groups
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SwaggerUpdateQuotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PublishResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update pay-out quotes
+      tags:
+      - quotes
+  /api/v1/quotes/publish:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PublishResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publish quotes to the network
+      tags:
+      - quotes
+  /api/v1/quotes/publish/pay-in:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PublishResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publish quotes to the network
+      tags:
+      - quotes
+  /api/v1/quotes/publish/pay-out:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PublishResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publish quotes to the network
+      tags:
+      - quotes
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

@@ -1,3 +1,4 @@
+// Package internal holds provider-side business logic that interacts with the t-0 Network.
 package internal
 
 import (

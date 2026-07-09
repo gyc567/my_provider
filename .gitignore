@@ -33,3 +33,7 @@ vendor/
 # ngrok / local proxy config sometimes ends up here
 ngrok.yml
 ngrok.cfg
+
+# Local runtime data
+/data/
+.omo/

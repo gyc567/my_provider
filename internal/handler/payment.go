@@ -1,3 +1,4 @@
+// Package handler implements the t-0 Network ProviderService RPC handlers.
 package handler
 
 import (
