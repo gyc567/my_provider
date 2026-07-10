@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,24 +18,31 @@ var validate = validator.New(validator.WithRequiredStructEnabled())
 
 // Handler exposes the payment REST API.
 type Handler struct {
-	store   Store
-	client  *NetworkClient
-	apiKeys map[string]struct{}
+	store        Store
+	client       *NetworkClient
+	apiKeys      map[string]struct{}
+	amlAdminKeys map[string]struct{}
 }
 
 // NewHandler creates a new payment REST handler.
 func NewHandler(store Store, client *NetworkClient, apiKeys []string) *Handler {
+	return NewHandlerWithAMLAdmins(store, client, apiKeys, nil)
+}
+
+// NewHandlerWithAMLAdmins creates a payment REST handler with separate AML admin keys.
+func NewHandlerWithAMLAdmins(store Store, client *NetworkClient, apiKeys []string, amlAdminKeys map[string]struct{}) *Handler {
 	keySet := make(map[string]struct{}, len(apiKeys))
 	for _, k := range apiKeys {
 		keySet[k] = struct{}{}
 	}
-	return &Handler{store: store, client: client, apiKeys: keySet}
+	return &Handler{store: store, client: client, apiKeys: keySet, amlAdminKeys: amlAdminKeys}
 }
 
 // Router returns the API mux.
 func (h *Handler) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/payments", h.withAuth(h.handleCreatePayment))
+	mux.HandleFunc("GET /api/v1/payments", h.withAuth(h.handleListPayments))
 	mux.HandleFunc("GET /api/v1/payments/{id}", h.withAuth(h.handleGetPayment))
 	mux.HandleFunc("POST /api/v1/payments/{id}/aml/approve", h.withAuth(h.handleAmlApprove))
 	mux.HandleFunc("POST /api/v1/payments/{id}/aml/reject", h.withAuth(h.handleAmlReject))
@@ -147,6 +155,35 @@ func (h *Handler) handleCreatePayment(w http.ResponseWriter, r *http.Request) {
 	h.jsonResponse(w, http.StatusCreated, updated)
 }
 
+func (h *Handler) handleListPayments(w http.ResponseWriter, r *http.Request) {
+	filter := ListPaymentsFilter{}
+	if role := r.URL.Query().Get("role"); role != "" {
+		r := Role(role)
+		filter.Role = &r
+	}
+	if status := r.URL.Query().Get("status"); status != "" {
+		s := Status(status)
+		filter.Status = &s
+	}
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = limit
+		}
+	}
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			filter.Offset = offset
+		}
+	}
+
+	payments, err := h.store.List(r.Context(), filter)
+	if err != nil {
+		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.jsonResponse(w, http.StatusOK, payments)
+}
+
 func (h *Handler) handleGetPayment(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -176,6 +213,12 @@ func (h *Handler) handleAmlReject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAmlDecision(w http.ResponseWriter, r *http.Request, approved bool) {
+	key := apiKeyFromRequest(r)
+	if !h.isAMLAdmin(key) {
+		httpError(w, "AML admin key required", http.StatusForbidden)
+		return
+	}
+
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -198,28 +241,36 @@ func (h *Handler) handleAmlDecision(w http.ResponseWriter, r *http.Request, appr
 		return
 	}
 
-	var reason string
-	if !approved {
-		var req struct {
-			Reason string `json:"reason"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httpError(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
-			return
-		}
-		reason = req.Reason
+	var req AmlDecisionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpError(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
 	}
 
-	if err := h.client.CompleteManualAmlCheck(r.Context(), *p.PaymentID, approved, reason); err != nil {
+	if !approved && req.Reason == "" {
+		httpError(w, "reason is required for reject", http.StatusBadRequest)
+		return
+	}
+
+	operatorID := req.OperatorID
+	if operatorID == "" {
+		operatorID = operatorIDFromKey(key)
+	}
+
+	// Idempotency: only process when still pending manual AML review.
+	if p.Status != StatusManualAmlCheck {
+		h.jsonResponse(w, http.StatusOK, p)
+		return
+	}
+
+	if err := h.client.CompleteManualAmlCheck(r.Context(), *p.PaymentID, approved, req.Reason); err != nil {
 		httpError(w, fmt.Sprintf("network error: %v", err), http.StatusBadGateway)
 		return
 	}
 
-	if !approved {
-		if err := h.store.UpdateFailed(r.Context(), id, reason); err != nil {
-			httpError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	if err := h.store.UpdateAmlDecision(r.Context(), id, approved, operatorID, req.Reason); err != nil {
+		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	p, _ = h.store.GetByID(r.Context(), id)
@@ -267,6 +318,30 @@ func (h *Handler) handleFinalizePayment(w http.ResponseWriter, r *http.Request) 
 
 	p, _ = h.store.GetByID(r.Context(), id)
 	h.jsonResponse(w, http.StatusOK, p)
+}
+
+func (h *Handler) isAMLAdmin(key string) bool {
+	if len(h.amlAdminKeys) == 0 {
+		return true
+	}
+	_, ok := h.amlAdminKeys[key]
+	return ok
+}
+
+func apiKeyFromRequest(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	return strings.TrimPrefix(auth, prefix)
+}
+
+func operatorIDFromKey(key string) string {
+	if key == "" {
+		return "unknown"
+	}
+	if len(key) > 8 {
+		return key[:8]
+	}
+	return key
 }
 
 func httpError(w http.ResponseWriter, message string, code int) {

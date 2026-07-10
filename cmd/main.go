@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	httpSwagger "github.com/swaggo/http-swagger"
@@ -41,17 +42,23 @@ var (
 )
 
 type Config struct {
-	NetworkPublicKey     provider.NetworkPublicKeyHexed
-	ProviderPrivateKey   network.PrivateKeyHexed
-	TZeroEndpoint        string
-	ServerAddr           string
-	DBPath               string
+	NetworkPublicKey           provider.NetworkPublicKeyHexed
+	ProviderPrivateKey         network.PrivateKeyHexed
+	TZeroEndpoint              string
+	ServerAddr                 string
+	DBPath                     string
 	APIKeys                    []string // comma-separated in PROVIDER_API_KEYS env var
+	AMLAdminKeys               map[string]struct{}
 	PublishPayOutDefault       bool
 	PublishPayInDefault        bool
 	PaymentBaseURL             string
 	SettlementWebhookURL       string
 	SettlementWebhookSecret    string
+	AMLAutoApprove             bool
+	AMLWebhookURL              string
+	AMLWebhookSecret           string
+	AMLWebhookTimeout          time.Duration
+	AMLWebhookMaxRetries       int
 	LastLookTolerancePercent   float64
 }
 
@@ -216,6 +223,33 @@ func loadConfig() Config {
 		}
 	}
 
+	amlAutoApprove := parseBoolEnv("AML_AUTO_APPROVE", false)
+
+	amlAdminKeys := parseAPIKeySet(os.Getenv("AML_ADMIN_API_KEYS"))
+	if len(amlAdminKeys) == 0 {
+		log.Println("WARN: AML_ADMIN_API_KEYS is empty — falling back to PROVIDER_API_KEYS for AML admin access (not recommended for production)")
+		amlAdminKeys = parseAPIKeySet(os.Getenv("PROVIDER_API_KEYS"))
+	}
+
+	amlWebhookURL := os.Getenv("AML_WEBHOOK_URL")
+	amlWebhookSecret := os.Getenv("AML_WEBHOOK_SECRET")
+	amlWebhookTimeout := 10 * time.Second
+	if v := os.Getenv("AML_WEBHOOK_TIMEOUT_SECONDS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			amlWebhookTimeout = time.Duration(parsed) * time.Second
+		} else {
+			log.Printf("WARN: AML_WEBHOOK_TIMEOUT_SECONDS=%q is not a valid positive integer, defaulting to 10", v)
+		}
+	}
+	amlWebhookMaxRetries := 5
+	if v := os.Getenv("AML_WEBHOOK_MAX_RETRIES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			amlWebhookMaxRetries = parsed
+		} else {
+			log.Printf("WARN: AML_WEBHOOK_MAX_RETRIES=%q is not a valid non-negative integer, defaulting to 5", v)
+		}
+	}
+
 	return Config{
 		NetworkPublicKey:         provider.NetworkPublicKeyHexed(os.Getenv("NETWORK_PUBLIC_KEY")),
 		ProviderPrivateKey:       network.PrivateKeyHexed(os.Getenv("PROVIDER_PRIVATE_KEY")),
@@ -223,11 +257,17 @@ func loadConfig() Config {
 		ServerAddr:               ":" + os.Getenv("PORT"),
 		DBPath:                   getEnv("DB_PATH", "./data/quotes.db"),
 		APIKeys:                  apiKeys,
+		AMLAdminKeys:             amlAdminKeys,
 		PublishPayOutDefault:     publishPayOutDefault,
 		PublishPayInDefault:      publishPayInDefault,
 		PaymentBaseURL:           paymentBaseURL,
 		SettlementWebhookURL:     os.Getenv("SETTLEMENT_WEBHOOK_URL"),
 		SettlementWebhookSecret:  os.Getenv("SETTLEMENT_WEBHOOK_SECRET"),
+		AMLAutoApprove:           amlAutoApprove,
+		AMLWebhookURL:            amlWebhookURL,
+		AMLWebhookSecret:         amlWebhookSecret,
+		AMLWebhookTimeout:        amlWebhookTimeout,
+		AMLWebhookMaxRetries:     amlWebhookMaxRetries,
 		LastLookTolerancePercent: lastLookTolerance,
 	}
 }
@@ -254,6 +294,31 @@ func parseAPIKeys(raw string) []string {
 	return out
 }
 
+func parseAPIKeySet(raw string) map[string]struct{} {
+	keys := parseAPIKeys(raw)
+	out := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
+func parseBoolEnv(key string, defaultValue bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		log.Printf("WARN: %s=%q is not a recognized boolean, defaulting to %v", key, v, defaultValue)
+		return defaultValue
+	}
+}
+
 func initNetworkClient(config Config) paymentconnect.NetworkServiceClient {
 	networkClient, err := network.NewServiceClient(
 		config.ProviderPrivateKey,
@@ -272,10 +337,20 @@ func startProviderServer(config Config, networkClient paymentconnect.NetworkServ
 		settlementNotifier = settlement.NewWebhookNotifier(config.SettlementWebhookURL, config.SettlementWebhookSecret)
 	}
 
+	var amlNotifier localpayment.AMLNotifier = localpayment.NewNoOpNotifier()
+	if config.AMLWebhookURL != "" {
+		amlNotifier = localpayment.NewAMLWebhookNotifier(localpayment.WebhookConfig{
+			URL:        config.AMLWebhookURL,
+			Secret:     config.AMLWebhookSecret,
+			Timeout:    config.AMLWebhookTimeout,
+			MaxRetries: config.AMLWebhookMaxRetries,
+		})
+	}
+
 	sdkHandler, err := provider.NewHttpHandler(
 		config.NetworkPublicKey,
 		provider.Handler(paymentconnect.NewProviderServiceHandler,
-			paymentconnect.ProviderServiceHandler(handler.NewProviderServiceImplementation(networkClient, paymentStore, settlementStore, settlementNotifier, config.LastLookTolerancePercent))),
+			paymentconnect.ProviderServiceHandler(handler.NewProviderServiceImplementation(networkClient, paymentStore, settlementStore, settlementNotifier, config.LastLookTolerancePercent, config.AMLAutoApprove, amlNotifier))),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create provider service handler: %v", err)
@@ -335,7 +410,7 @@ func startProviderServer(config Config, networkClient paymentconnect.NetworkServ
 
 	// paymentHandler exposes the payment lifecycle endpoints.
 	paymentClient := localpayment.NewNetworkClient(networkClient)
-	paymentHandler := localpayment.NewHandler(paymentStore, paymentClient, config.APIKeys)
+	paymentHandler := localpayment.NewHandlerWithAMLAdmins(paymentStore, paymentClient, config.APIKeys, config.AMLAdminKeys)
 
 	// settlementHandler exposes credit/ledger query endpoints.
 	settlementHandler := settlement.NewAPIHandler(settlementStore, config.APIKeys)

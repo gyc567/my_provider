@@ -182,7 +182,7 @@ func newTestServer(t *testing.T) *testServer {
 	sdkHandler, err := provider.NewHttpHandler(
 		provider.NetworkPublicKeyHexed("0x041b6acf3e830b593aaa992f2f1543dc8063197acfeecefd65135259327ef3166acaca83d62db19eb4fecb3d04e44094378839b8c13a2af26bf78fed56a4af935b"),
 		provider.Handler(paymentconnect.NewProviderServiceHandler,
-			paymentconnect.ProviderServiceHandler(handler.NewProviderServiceImplementation(fakePaymentNet, paymentStore, settlementStore, settlement.NewNoOpNotifier(), 1.0))),
+			paymentconnect.ProviderServiceHandler(handler.NewProviderServiceImplementation(fakePaymentNet, paymentStore, settlementStore, settlement.NewNoOpNotifier(), 1.0, false, localpayment.NewNoOpNotifier()))),
 	)
 	if err != nil {
 		t.Fatalf("provider sdk handler: %v", err)
@@ -223,7 +223,7 @@ func newTestServer(t *testing.T) *testServer {
 	publisher := quote.NewPublisher(quoteStore, fakePaymentNet, false, false)
 	quoteHandler := quoteapi.NewHandler(quoteStore, publisher, fakePaymentNet, keys)
 	paymentClient := localpayment.NewNetworkClient(fakePaymentNet)
-	paymentHandler := localpayment.NewHandler(paymentStore, paymentClient, keys)
+	paymentHandler := localpayment.NewHandlerWithAMLAdmins(paymentStore, paymentClient, keys, nil)
 	settlementHandler := settlement.NewAPIHandler(settlementStore, keys)
 	piProviderAPI := paymentintentprovider.NewAPIHandler(paymentIntentStore, piProviderClient, keys)
 	piRecipientAPI := paymentintentrecipient.NewAPIHandler(paymentIntentStore, piRecipientClient, keys)

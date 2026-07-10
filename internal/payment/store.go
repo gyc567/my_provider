@@ -19,14 +19,26 @@ type Store interface {
 	// GetByPaymentID returns a payment by network-assigned payment ID.
 	GetByPaymentID(ctx context.Context, paymentID uint64) (*Payment, error)
 
+	// List returns payments matching the filter.
+	List(ctx context.Context, filter ListPaymentsFilter) ([]Payment, error)
+
 	// UpdateStatus transitions a payment's status and updated_at timestamp.
 	UpdateStatus(ctx context.Context, id int64, status Status) error
 
 	// UpdatePayoutRequest records that the network requested a payout.
 	UpdatePayoutRequest(ctx context.Context, id int64, paymentID uint64, payoutProviderID uint32) error
 
+	// UpdateManualAmlCheck records that the provider requested manual AML review.
+	UpdateManualAmlCheck(ctx context.Context, id int64) error
+
+	// UpdateAmlDecision records the AML approve/reject decision.
+	UpdateAmlDecision(ctx context.Context, id int64, approved bool, operatorID, reason string) error
+
 	// UpdateAccepted records the network's Accepted update.
 	UpdateAccepted(ctx context.Context, id int64, payoutAmount *Decimal) error
+
+	// UpdateQuoteConfirmed records the confirmed quote details from ApprovePaymentQuotes.
+	UpdateQuoteConfirmed(ctx context.Context, id int64, payoutAmount, settlementAmount *Decimal, quoteID int64) error
 
 	// UpdateConfirmed records the network's Confirmed update.
 	UpdateConfirmed(ctx context.Context, id int64, payoutID, receipt string) error

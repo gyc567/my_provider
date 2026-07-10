@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/t-0-network/provider-sdk-go/api/ivms101/v1/ivms"
@@ -13,18 +14,41 @@ import (
 	"github.com/t-0-network/provider-sdk-go/api/tzero/v1/payment/paymentconnect"
 )
 
+// defaultNetworkTimeout is the context timeout applied to network calls when none is configured.
+const defaultNetworkTimeout = 10 * time.Second
+
 // NetworkClient wraps the SDK NetworkServiceClient with domain-friendly methods.
 type NetworkClient struct {
-	client paymentconnect.NetworkServiceClient
+	client  paymentconnect.NetworkServiceClient
+	timeout time.Duration
 }
 
 // NewNetworkClient creates a new payment network client.
 func NewNetworkClient(client paymentconnect.NetworkServiceClient) *NetworkClient {
-	return &NetworkClient{client: client}
+	return NewNetworkClientWithTimeout(client, defaultNetworkTimeout)
+}
+
+// NewNetworkClientWithTimeout creates a network client with the given per-call timeout.
+func NewNetworkClientWithTimeout(client paymentconnect.NetworkServiceClient, timeout time.Duration) *NetworkClient {
+	if timeout <= 0 {
+		timeout = defaultNetworkTimeout
+	}
+	return &NetworkClient{client: client, timeout: timeout}
+}
+
+// withTimeout returns a derived context with the configured timeout.
+func (c *NetworkClient) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c.timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, c.timeout)
 }
 
 // CreatePayment submits a payment creation request to the t-0 Network.
 func (c *NetworkClient) CreatePayment(ctx context.Context, req CreateRequest) (*payment.CreatePaymentResponse, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
 	var amount *payment.PaymentAmount
 	switch req.AmountType {
 	case "pay_out":
@@ -67,6 +91,7 @@ func (c *NetworkClient) CreatePayment(ctx context.Context, req CreateRequest) (*
 }
 
 // FinalizePayout reports a payout result to the t-0 Network.
+// The call is idempotent and is retried once on failure.
 func (c *NetworkClient) FinalizePayout(ctx context.Context, paymentID uint64, req FinalizeRequest) error {
 	sdkReq := &payment.FinalizePayoutRequest{PaymentId: paymentID}
 	if req.Success {
@@ -80,11 +105,15 @@ func (c *NetworkClient) FinalizePayout(ctx context.Context, paymentID uint64, re
 		}}
 	}
 
-	_, err := c.client.FinalizePayout(ctx, connect.NewRequest(sdkReq))
-	return err
+	call := func(ctx context.Context) error {
+		_, err := c.client.FinalizePayout(ctx, connect.NewRequest(sdkReq))
+		return err
+	}
+	return c.withTimeoutAndRetry(ctx, call)
 }
 
 // CompleteManualAmlCheck reports the result of a manual AML check to the t-0 Network.
+// The call is idempotent and is retried once on failure.
 func (c *NetworkClient) CompleteManualAmlCheck(ctx context.Context, paymentID uint64, approved bool, reason string) error {
 	sdkReq := &payment.CompleteManualAmlCheckRequest{PaymentId: paymentID}
 	if approved {
@@ -95,8 +124,25 @@ func (c *NetworkClient) CompleteManualAmlCheck(ctx context.Context, paymentID ui
 		}}
 	}
 
-	_, err := c.client.CompleteManualAmlCheck(ctx, connect.NewRequest(sdkReq))
-	return err
+	call := func(ctx context.Context) error {
+		_, err := c.client.CompleteManualAmlCheck(ctx, connect.NewRequest(sdkReq))
+		return err
+	}
+	return c.withTimeoutAndRetry(ctx, call)
+}
+
+// withTimeoutAndRetry executes call with the configured timeout and retries once on error.
+func (c *NetworkClient) withTimeoutAndRetry(ctx context.Context, call func(context.Context) error) error {
+	callCtx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	if err := call(callCtx); err != nil {
+		retryCtx, cancel := c.withTimeout(ctx)
+		defer cancel()
+		if retryErr := call(retryCtx); retryErr != nil {
+			return retryErr
+		}
+	}
+	return nil
 }
 
 func toCommonDecimal(d Decimal) *common.Decimal {

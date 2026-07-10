@@ -15,10 +15,18 @@ const (
 	StatusCreated         Status = "CREATED"
 	StatusAccepted        Status = "ACCEPTED"
 	StatusPayoutRequested Status = "PAYOUT_REQUESTED"
+	StatusManualAmlCheck  Status = "MANUAL_AML_CHECK"
+	StatusAmlApproved     Status = "AML_APPROVED"
+	StatusQuoteConfirmed  Status = "QUOTE_CONFIRMED"
 	StatusPayoutAccepted  Status = "PAYOUT_ACCEPTED"
 	StatusConfirmed       Status = "CONFIRMED"
 	StatusFailed          Status = "FAILED"
 )
+
+// IsTerminal reports whether the payment has reached a final state.
+func (s Status) IsTerminal() bool {
+	return s == StatusConfirmed || s == StatusFailed
+}
 
 // Role identifies which side of the payout flow the record belongs to.
 type Role string
@@ -42,25 +50,30 @@ type QuoteID struct {
 
 // Payment is the domain object for a payout payment.
 type Payment struct {
-	ID                 int64
-	PaymentID          *uint64
-	PaymentClientID    string
-	Role               Role
-	Status             Status
-	PayoutCurrency     string
-	PayoutMethod       string
-	PayoutAmount       *Decimal
-	SettlementAmount   *Decimal
-	QuoteID            *int64
-	ProviderID         *int32
-	PayoutProviderID   *uint32
-	PaymentDetailsJSON string
-	TravelRuleDataJSON string
-	PayoutID           string
-	Receipt            string
-	RejectReason       string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                      int64
+	PaymentID               *uint64
+	PaymentClientID         string
+	Role                    Role
+	Status                  Status
+	PayoutCurrency          string
+	PayoutMethod            string
+	PayoutAmount            *Decimal
+	SettlementAmount        *Decimal
+	ConfirmedPayoutAmount   *Decimal
+	ConfirmedSettlementAmount *Decimal
+	ConfirmedQuoteID        *int64
+	QuoteID                 *int64
+	ProviderID              *int32
+	PayoutProviderID        *uint32
+	PaymentDetailsJSON      string
+	TravelRuleDataJSON      string
+	PayoutID                string
+	Receipt                 string
+	RejectReason            string
+	AmlDecisionBy           string
+	AmlDecisionAt           *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 // Validate implements the Layer 2 contract check.
@@ -96,6 +109,20 @@ type FinalizeRequest struct {
 	PayoutID     string `json:"payoutId,omitempty"`
 	Receipt      string `json:"receipt,omitempty"`
 	RejectReason string `json:"rejectReason,omitempty"`
+}
+
+// AmlDecisionRequest is the REST payload for AML approve/reject.
+type AmlDecisionRequest struct {
+	Reason     string `json:"reason,omitempty"`
+	OperatorID string `json:"operatorId,omitempty"`
+}
+
+// ListPaymentsFilter is used for GET /api/v1/payments list queries.
+type ListPaymentsFilter struct {
+	Role   *Role
+	Status *Status
+	Limit  int
+	Offset int
 }
 
 // JSONRaw is a thin wrapper so empty raw messages marshal as {} instead of null.

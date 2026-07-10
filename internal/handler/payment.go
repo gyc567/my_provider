@@ -29,7 +29,9 @@ type ProviderServiceImplementation struct {
 	paymentStore        localpayment.Store
 	settlementStore     settlement.Store
 	settlementNotifier  settlement.Notifier
+	amlNotifier         localpayment.AMLNotifier
 	lastLookTolerance   float64 // percentage, e.g. 1.0 = 1%
+	amlAutoApprove      bool
 }
 
 func NewProviderServiceImplementation(
@@ -38,6 +40,8 @@ func NewProviderServiceImplementation(
 	settlementStore settlement.Store,
 	settlementNotifier settlement.Notifier,
 	lastLookTolerance float64,
+	amlAutoApprove bool,
+	amlNotifier localpayment.AMLNotifier,
 ) *ProviderServiceImplementation {
 	if lastLookTolerance < 0 {
 		lastLookTolerance = 0
@@ -45,22 +49,24 @@ func NewProviderServiceImplementation(
 	if settlementNotifier == nil {
 		settlementNotifier = settlement.NewNoOpNotifier()
 	}
+	if amlNotifier == nil {
+		amlNotifier = localpayment.NewNoOpNotifier()
+	}
 	return &ProviderServiceImplementation{
 		networkClient:      networkClient,
 		paymentStore:       paymentStore,
 		settlementStore:    settlementStore,
 		settlementNotifier: settlementNotifier,
+		amlNotifier:        amlNotifier,
 		lastLookTolerance:  lastLookTolerance,
+		amlAutoApprove:     amlAutoApprove,
 	}
 }
 
 var _ paymentconnect.ProviderServiceHandler = (*ProviderServiceImplementation)(nil)
 
 // PayOut is invoked by the network to instruct the provider to execute a
-// payout to the recipient. Phase 2 smoke-test behaviour:
-//   - Return ManualAmlCheck so the network enters the manual-AML branch.
-//   - After a short delay, call CompleteManualAmlCheck(Approved) so the
-//     network advances the payment to UpdatePayment(Accepted).
+// payout to the recipient.
 func (s *ProviderServiceImplementation) PayOut(
 	ctx context.Context, req *connect.Request[payment.PayoutRequest],
 ) (*connect.Response[payment.PayoutResponse], error) {
@@ -105,6 +111,18 @@ func (s *ProviderServiceImplementation) PayOut(
 		return nil, err
 	}
 
+	if err := s.paymentStore.UpdateManualAmlCheck(ctx, p.ID); err != nil {
+		log.Printf("PayOut: failed to set MANUAL_AML_CHECK for payment_id=%d: %s\n", paymentID, err.Error())
+		return nil, err
+	}
+
+	p.Status = localpayment.StatusManualAmlCheck
+	if s.amlAutoApprove {
+		go s.approveAmlAfter(paymentID, amlAutoApproveDelay)
+	} else if notifyErr := s.amlNotifier.ManualAmlCheckRequired(ctx, *p); notifyErr != nil {
+		log.Printf("PayOut: AML notification failed for payment_id=%d: %s\n", paymentID, notifyErr.Error())
+	}
+
 	log.Printf(
 		"PayOut received: payment_id=%d currency=%s amount=%s client_quote_id=%s pay_in_provider_id=%d\n",
 		paymentID,
@@ -113,8 +131,6 @@ func (s *ProviderServiceImplementation) PayOut(
 		req.Msg.ClientQuoteId,
 		req.Msg.PayInProviderId,
 	)
-
-	go s.approveAmlAfter(paymentID, amlAutoApproveDelay)
 
 	return connect.NewResponse(&payment.PayoutResponse{
 		Result: &payment.PayoutResponse_ManualAmlCheck_{},
@@ -159,8 +175,20 @@ func (s *ProviderServiceImplementation) UpdatePayment(
 	switch result := req.Msg.Result.(type) {
 	case *payment.UpdatePaymentRequest_Accepted_:
 		acc := result.Accepted
-		if err := s.paymentStore.UpdateAccepted(ctx, p.ID, fromSDKDecimal(acc.PayoutAmount)); err != nil {
-			log.Printf("UpdatePayment Accepted: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+		switch p.Status {
+		case localpayment.StatusCreated:
+			if err := s.paymentStore.UpdateAccepted(ctx, p.ID, fromSDKDecimal(acc.PayoutAmount)); err != nil {
+				log.Printf("UpdatePayment Accepted: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+			}
+		case localpayment.StatusAmlApproved:
+			// Network accepted the payment after AML approval; move to quote confirmed.
+			if err := s.paymentStore.UpdateStatus(ctx, p.ID, localpayment.StatusQuoteConfirmed); err != nil {
+				log.Printf("UpdatePayment Accepted: failed to update status for payment_id=%d: %s\n", paymentID, err.Error())
+			}
+		case localpayment.StatusQuoteConfirmed:
+			// Already confirmed; no state change needed.
+		default:
+			log.Printf("UpdatePayment Accepted: unexpected current status %s for payment_id=%d\n", p.Status, paymentID)
 		}
 	case *payment.UpdatePaymentRequest_Confirmed_:
 		conf := result.Confirmed
@@ -225,7 +253,12 @@ func (s *ProviderServiceImplementation) ApprovePaymentQuotes(ctx context.Context
 	approved := true
 	reason := ""
 
-	if p, err := s.paymentStore.GetByPaymentID(ctx, req.PaymentId); err == nil && p != nil {
+	p, err := s.paymentStore.GetByPaymentID(ctx, req.PaymentId)
+	if err == nil && p != nil {
+		if err := s.paymentStore.UpdateQuoteConfirmed(ctx, p.ID, fromSDKDecimal(req.PayOutAmount), fromSDKDecimal(req.SettlementAmount), req.PayOutQuoteId); err != nil {
+			log.Printf("ApprovePaymentQuotes: failed to persist confirmed amounts for payment_id=%d: %s\n", req.PaymentId, err.Error())
+		}
+
 		if s.outsideTolerance(p.PayoutAmount, fromSDKDecimal(req.PayOutAmount)) {
 			approved = false
 			reason = fmt.Sprintf("pay-out amount outside tolerance: stored %v, got %v", p.PayoutAmount, req.PayOutAmount)
@@ -233,6 +266,19 @@ func (s *ProviderServiceImplementation) ApprovePaymentQuotes(ctx context.Context
 		if approved && s.outsideTolerance(p.SettlementAmount, fromSDKDecimal(req.SettlementAmount)) {
 			approved = false
 			reason = fmt.Sprintf("settlement amount outside tolerance: stored %v, got %v", p.SettlementAmount, req.SettlementAmount)
+		}
+
+		p, _ = s.paymentStore.GetByPaymentID(ctx, req.PaymentId)
+		if p != nil {
+			if approved {
+				if notifyErr := s.amlNotifier.QuoteConfirmed(ctx, *p); notifyErr != nil {
+					log.Printf("ApprovePaymentQuotes: quote confirmed notification failed for payment_id=%d: %s\n", req.PaymentId, notifyErr.Error())
+				}
+			} else {
+				if notifyErr := s.amlNotifier.QuoteRejected(ctx, *p, reason); notifyErr != nil {
+					log.Printf("ApprovePaymentQuotes: quote rejected notification failed for payment_id=%d: %s\n", req.PaymentId, notifyErr.Error())
+				}
+			}
 		}
 	} else if err != nil && !errors.Is(err, localpayment.ErrNotFound) {
 		log.Printf("ApprovePaymentQuotes: failed to load payment_id=%d: %s\n", req.PaymentId, err.Error())
