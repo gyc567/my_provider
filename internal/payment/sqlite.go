@@ -353,6 +353,7 @@ func doScan(row scanner) (*Payment, error) {
 	var confirmedPayoutAmountExponent, confirmedSettlementAmountExponent int32
 	var quoteID, confirmedQuoteID sql.NullInt64
 	var providerID, payoutProviderID sql.NullInt32
+	var amlDecisionBy sql.NullString
 	var amlDecisionAt sql.NullTime
 
 	err := row.Scan(
@@ -366,7 +367,7 @@ func doScan(row scanner) (*Payment, error) {
 		&quoteID, &providerID, &payoutProviderID,
 		&p.PaymentDetailsJSON, &p.TravelRuleDataJSON,
 		&p.PayoutID, &p.Receipt, &p.RejectReason,
-		&p.AmlDecisionBy, &amlDecisionAt,
+		&amlDecisionBy, &amlDecisionAt,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -396,6 +397,9 @@ func doScan(row scanner) (*Payment, error) {
 	if payoutProviderID.Valid {
 		pid := uint32(payoutProviderID.Int32)
 		p.PayoutProviderID = &pid
+	}
+	if amlDecisionBy.Valid {
+		p.AmlDecisionBy = amlDecisionBy.String
 	}
 	if amlDecisionAt.Valid {
 		t := amlDecisionAt.Time
