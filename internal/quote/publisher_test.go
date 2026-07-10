@@ -50,7 +50,7 @@ func TestPublisher_PublishWithDefaults(t *testing.T) {
 	defer cleanup()
 
 	net := &mockNetworkClient{}
-	publisher := NewPublisher(store, net, true)
+	publisher := NewPublisher(store, net, true, false)
 
 	if err := publisher.Publish(context.Background()); err != nil {
 		t.Fatalf("Publish() error = %v", err)
@@ -82,7 +82,7 @@ func TestPublisher_PublishStoredQuotes(t *testing.T) {
 	}
 
 	net := &mockNetworkClient{}
-	publisher := NewPublisher(store, net, false)
+	publisher := NewPublisher(store, net, false, false)
 
 	if err := publisher.Publish(context.Background()); err != nil {
 		t.Fatalf("Publish() error = %v", err)
@@ -101,7 +101,7 @@ func TestPublisher_PublishNetworkError(t *testing.T) {
 	defer cleanup()
 
 	net := &mockNetworkClient{updateQuoteErr: errors.New("network error")}
-	publisher := NewPublisher(store, net, true)
+	publisher := NewPublisher(store, net, true, false)
 
 	if err := publisher.Publish(context.Background()); err == nil {
 		t.Fatal("expected error")
@@ -123,7 +123,7 @@ func TestPublisher_FiltersExpiredQuotes(t *testing.T) {
 	}
 
 	net := &mockNetworkClient{}
-	publisher := NewPublisher(store, net, false)
+	publisher := NewPublisher(store, net, false, false)
 
 	if err := publisher.Publish(context.Background()); err != nil {
 		t.Fatalf("Publish() error = %v", err)
@@ -149,7 +149,7 @@ func TestPublisher_RegeneratesExpiredDefaults(t *testing.T) {
 	}
 
 	net := &mockNetworkClient{}
-	publisher := NewPublisher(store, net, true)
+	publisher := NewPublisher(store, net, true, false)
 
 	if err := publisher.Publish(context.Background()); err != nil {
 		t.Fatalf("Publish() error = %v", err)

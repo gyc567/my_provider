@@ -16,17 +16,19 @@ import (
 
 // Publisher publishes quote snapshots to the t-0 network.
 type Publisher struct {
-	store   Store
-	client  paymentconnect.NetworkServiceClient
+	store         Store
+	client        paymentconnect.NetworkServiceClient
 	defaultPayOut bool
+	defaultPayIn  bool
 }
 
 // NewPublisher creates a new quote publisher.
-func NewPublisher(store Store, client paymentconnect.NetworkServiceClient, defaultPayOut bool) *Publisher {
+func NewPublisher(store Store, client paymentconnect.NetworkServiceClient, defaultPayOut, defaultPayIn bool) *Publisher {
 	return &Publisher{
 		store:         store,
 		client:        client,
 		defaultPayOut: defaultPayOut,
+		defaultPayIn:  defaultPayIn,
 	}
 }
 
@@ -37,7 +39,7 @@ func (p *Publisher) Publish(ctx context.Context) error {
 		return fmt.Errorf("loading pay-out snapshots: %w", err)
 	}
 
-	payIn, err := p.loadStream(ctx, StreamTypePayIn, false)
+	payIn, err := p.loadStream(ctx, StreamTypePayIn, p.defaultPayIn)
 	if err != nil {
 		return fmt.Errorf("loading pay-in snapshots: %w", err)
 	}
@@ -62,10 +64,14 @@ func (p *Publisher) loadStream(ctx context.Context, stream StreamType, useDefaul
 		return nil, err
 	}
 
-	if stream == StreamTypePayOut && useDefault && (err == ErrNotFound || allExpired(groups)) {
-		groups = defaultPayOutQuotes()
-		if err := p.store.ReplaceSnapshots(ctx, StreamTypePayOut, groups); err != nil {
-			return nil, fmt.Errorf("saving default pay-out snapshots: %w", err)
+	if useDefault && (err == ErrNotFound || allExpired(groups)) {
+		if stream == StreamTypePayOut {
+			groups = defaultPayOutQuotes()
+		} else {
+			groups = defaultPayInQuotes()
+		}
+		if err := p.store.ReplaceSnapshots(ctx, stream, groups); err != nil {
+			return nil, fmt.Errorf("saving default %s snapshots: %w", stream, err)
 		}
 	}
 
@@ -115,6 +121,23 @@ func toProtoQuotes(groups []QuoteGroup) []*payment.UpdateQuoteRequest_Quote {
 		out = append(out, q)
 	}
 	return out
+}
+
+// defaultPayInQuotes returns a sample EUR/SEPA pay-in quote.
+func defaultPayInQuotes() []QuoteGroup {
+	now := time.Now().UTC()
+	expiration := now.Add(30 * time.Second)
+	return []QuoteGroup{
+		{
+			Currency:      "EUR",
+			PaymentMethod: common.PaymentMethodType_PAYMENT_METHOD_TYPE_SEPA.String(),
+			Expiration:    expiration,
+			Timestamp:     now,
+			Bands: []Band{
+				{ClientQuoteID: uuid.NewString(), MaxAmount: Decimal{Unscaled: 1000, Exponent: 0}, Rate: Decimal{Unscaled: 11628, Exponent: -6}}, // 1/0.86
+			},
+		},
+	}
 }
 
 // defaultPayOutQuotes returns the original EUR/SEPA default quotes.

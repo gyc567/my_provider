@@ -184,6 +184,42 @@ func CreateUser(
 
 ---
 
-## 八、一句话总结
+## 八、生产部署规则
+
+### 8.1 统一使用 systemd 部署
+
+生产环境必须统一通过 systemd 服务启动，禁止直接运行 `./scripts/deploy-local.sh`（nohup 模式）到生产环境，以避免出现并行进程或端口冲突。
+
+标准生产部署命令：
+
+```bash
+./scripts/deploy-local.sh --systemd
+```
+
+该命令会：
+1. 构建生产优化二进制并注入 git commit / build time
+2. 安装到 `/usr/local/bin/my-provider`
+3. 执行 `systemctl daemon-reload && systemctl restart my-provider.service`
+4. 等待服务就绪并运行冒烟测试
+
+### 8.2 服务管理
+
+- 服务文件：`/etc/systemd/system/my-provider.service`
+- 查看状态：`systemctl status my-provider.service`
+- 查看日志：`journalctl -u my-provider.service -f`
+- 停止服务：`./scripts/deploy-local.sh --systemd --stop`
+
+### 8.3 本地开发
+
+本地开发可使用 nohup 模式：
+
+```bash
+./scripts/deploy-local.sh
+./scripts/deploy-local.sh --stop
+```
+
+---
+
+## 九、一句话总结
 
 > **先想清楚，再写最少且精准的代码；每层输入必须校验，每个功能必须测试；保持 KISS、高内聚、低耦合。**

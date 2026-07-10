@@ -95,7 +95,7 @@ func (n *errorNetwork) UpdateQuote(_ context.Context, _ *connect.Request[payment
 func TestPublishQuotes_LogsErrorsAndContinues(t *testing.T) {
 	store := &memoryStore{}
 	net := &errorNetwork{}
-	publisher := quote.NewPublisher(store, net, true)
+	publisher := quote.NewPublisher(store, net, true, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -120,7 +120,7 @@ func TestPublishQuotes_LogsErrorsAndContinues(t *testing.T) {
 func TestPublishQuotes_PublishesOnStartupAndStops(t *testing.T) {
 	store := &memoryStore{}
 	net := &countingNetwork{}
-	publisher := quote.NewPublisher(store, net, true)
+	publisher := quote.NewPublisher(store, net, true, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

@@ -3,13 +3,19 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
-	"sync"
+	"math"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/t-0-network/provider-sdk-go/api/tzero/v1/common"
 	"github.com/t-0-network/provider-sdk-go/api/tzero/v1/payment"
 	"github.com/t-0-network/provider-sdk-go/api/tzero/v1/payment/paymentconnect"
+	localpayment "my-provider/internal/payment"
+	"my-provider/internal/settlement"
 )
 
 // amlAutoApproveDelay is how long the provider waits after returning
@@ -18,24 +24,35 @@ import (
 // drive the call asynchronously instead of on a fixed timer.
 const amlAutoApproveDelay = 3 * time.Second
 
-// payments tracks PayoutRequests that returned ManualAmlCheck so the
-// provider's state can be observed across callbacks (e.g. via UpdatePayment
-// logs). Process-local map; resets on restart.
-var payments sync.Map // map[uint64]time.Time — payment_id → received_at
-
 type ProviderServiceImplementation struct {
-	networkClient paymentconnect.NetworkServiceClient
+	networkClient       paymentconnect.NetworkServiceClient
+	paymentStore        localpayment.Store
+	settlementStore     settlement.Store
+	settlementNotifier  settlement.Notifier
+	lastLookTolerance   float64 // percentage, e.g. 1.0 = 1%
 }
 
-func NewProviderServiceImplementation(networkClient paymentconnect.NetworkServiceClient) *ProviderServiceImplementation {
+func NewProviderServiceImplementation(
+	networkClient paymentconnect.NetworkServiceClient,
+	paymentStore localpayment.Store,
+	settlementStore settlement.Store,
+	settlementNotifier settlement.Notifier,
+	lastLookTolerance float64,
+) *ProviderServiceImplementation {
+	if lastLookTolerance < 0 {
+		lastLookTolerance = 0
+	}
+	if settlementNotifier == nil {
+		settlementNotifier = settlement.NewNoOpNotifier()
+	}
 	return &ProviderServiceImplementation{
-		networkClient: networkClient,
+		networkClient:      networkClient,
+		paymentStore:       paymentStore,
+		settlementStore:    settlementStore,
+		settlementNotifier: settlementNotifier,
+		lastLookTolerance:  lastLookTolerance,
 	}
 }
-
-/*
-  Please refer to docs, proto definition comments or source code comments to understand purpose of functions
-*/
 
 var _ paymentconnect.ProviderServiceHandler = (*ProviderServiceImplementation)(nil)
 
@@ -44,22 +61,55 @@ var _ paymentconnect.ProviderServiceHandler = (*ProviderServiceImplementation)(n
 //   - Return ManualAmlCheck so the network enters the manual-AML branch.
 //   - After a short delay, call CompleteManualAmlCheck(Approved) so the
 //     network advances the payment to UpdatePayment(Accepted).
-//
-// The delayed RPC runs on a fresh context (not the request ctx) so it
-// survives after the handler returns.
 func (s *ProviderServiceImplementation) PayOut(
 	ctx context.Context, req *connect.Request[payment.PayoutRequest],
 ) (*connect.Response[payment.PayoutResponse], error) {
 	paymentID := req.Msg.PaymentId
-	receivedAt := time.Now()
-	payments.Store(paymentID, receivedAt)
+	p, err := s.paymentStore.GetByPaymentID(ctx, paymentID)
+	if err != nil && !errors.Is(err, localpayment.ErrNotFound) {
+		log.Printf("PayOut: failed to load payment_id=%d: %s\n", paymentID, err.Error())
+		return nil, err
+	}
+
+	if p == nil {
+		// Payment was created elsewhere or not yet persisted; create a placeholder.
+		payoutAmount := fromSDKDecimal(req.Msg.Amount)
+		var payoutAmountJSON, travelRuleJSON string
+		if req.Msg.PayoutDetails != nil {
+			b, _ := json.Marshal(req.Msg.PayoutDetails)
+			payoutAmountJSON = string(b)
+		}
+		if req.Msg.TravelRuleData != nil {
+			b, _ := json.Marshal(req.Msg.TravelRuleData)
+			travelRuleJSON = string(b)
+		}
+		p = &localpayment.Payment{
+			Role:               localpayment.RoleProvider,
+			Status:             localpayment.StatusCreated,
+			PayoutCurrency:     req.Msg.Currency,
+			PayoutMethod:       methodFromDetails(req.Msg.PayoutDetails),
+			PayoutAmount:       payoutAmount,
+			PaymentDetailsJSON: payoutAmountJSON,
+			TravelRuleDataJSON: travelRuleJSON,
+		}
+		id, createErr := s.paymentStore.Create(ctx, *p)
+		if createErr != nil {
+			log.Printf("PayOut: failed to create payment_id=%d: %s\n", paymentID, createErr.Error())
+			return nil, createErr
+		}
+		p.ID = id
+	}
+
+	if err := s.paymentStore.UpdatePayoutRequest(ctx, p.ID, paymentID, req.Msg.PayInProviderId); err != nil {
+		log.Printf("PayOut: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+		return nil, err
+	}
 
 	log.Printf(
-		"PayOut received: payment_id=%d currency=%s amount=%s method=%v client_quote_id=%s pay_in_provider_id=%d\n",
+		"PayOut received: payment_id=%d currency=%s amount=%s client_quote_id=%s pay_in_provider_id=%d\n",
 		paymentID,
 		req.Msg.Currency,
 		req.Msg.Amount,
-		req.Msg.PayoutDetails,
 		req.Msg.ClientQuoteId,
 		req.Msg.PayInProviderId,
 	)
@@ -72,12 +122,10 @@ func (s *ProviderServiceImplementation) PayOut(
 }
 
 // approveAmlAfter sleeps for the given delay then calls
-// CompleteManualAmlCheck(Approved). Errors are logged but not retried —
-// the network is idempotent and will retry PayoutRequest if needed.
+// CompleteManualAmlCheck(Approved). Errors are logged but not retried.
 func (s *ProviderServiceImplementation) approveAmlAfter(paymentID uint64, delay time.Duration) {
 	time.Sleep(delay)
 
-	// Detached context so we outlive the originating request.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -94,34 +142,53 @@ func (s *ProviderServiceImplementation) approveAmlAfter(paymentID uint64, delay 
 	log.Printf("CompleteManualAmlCheck(Approved) sent for payment_id=%d\n", paymentID)
 }
 
-// UpdatePayment is invoked by the network with state changes for a payment
-// previously submitted via PayOut or equivalent flow.
+// UpdatePayment is invoked by the network with state changes for a payment.
 func (s *ProviderServiceImplementation) UpdatePayment(
 	ctx context.Context, req *connect.Request[payment.UpdatePaymentRequest],
 ) (*connect.Response[payment.UpdatePaymentResponse], error) {
-	resultKind := "unknown"
-	switch req.Msg.Result.(type) {
-	case *payment.UpdatePaymentRequest_Accepted_:
-		resultKind = "Accepted"
-	case *payment.UpdatePaymentRequest_Failed_:
-		resultKind = "Failed"
-	case *payment.UpdatePaymentRequest_Confirmed_:
-		resultKind = "Confirmed"
-	case *payment.UpdatePaymentRequest_ManualAmlCheck_:
-		resultKind = "ManualAmlCheck"
+	paymentID := req.Msg.PaymentId
+	p, err := s.paymentStore.GetByPaymentID(ctx, paymentID)
+	if err != nil {
+		if errors.Is(err, localpayment.ErrNotFound) {
+			log.Printf("UpdatePayment: payment_id=%d not found in local store\n", paymentID)
+			return connect.NewResponse(&payment.UpdatePaymentResponse{}), nil
+		}
+		return nil, err
 	}
 
-	if v, ok := payments.Load(req.Msg.PaymentId); ok {
-		log.Printf(
-			"UpdatePayment received: payment_id=%d payment_client_id=%s result=%s (PayoutRequest was received %s ago)\n",
-			req.Msg.PaymentId, req.Msg.PaymentClientId, resultKind, time.Since(v.(time.Time)).Round(time.Millisecond),
-		)
-	} else {
-		log.Printf(
-			"UpdatePayment received: payment_id=%d payment_client_id=%s result=%s (no prior PayoutRequest in this process)\n",
-			req.Msg.PaymentId, req.Msg.PaymentClientId, resultKind,
-		)
+	switch result := req.Msg.Result.(type) {
+	case *payment.UpdatePaymentRequest_Accepted_:
+		acc := result.Accepted
+		if err := s.paymentStore.UpdateAccepted(ctx, p.ID, fromSDKDecimal(acc.PayoutAmount)); err != nil {
+			log.Printf("UpdatePayment Accepted: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+		}
+	case *payment.UpdatePaymentRequest_Confirmed_:
+		conf := result.Confirmed
+		receipt := ""
+		if conf.Receipt != nil {
+			b, _ := json.Marshal(conf.Receipt)
+			receipt = string(b)
+		}
+		if err := s.paymentStore.UpdateConfirmed(ctx, p.ID, "", receipt); err != nil {
+			log.Printf("UpdatePayment Confirmed: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+		}
+	case *payment.UpdatePaymentRequest_Failed_:
+		failed := result.Failed
+		reason := failed.Reason.String()
+		if failed.Details != nil {
+			reason += ": " + *failed.Details
+		}
+		if err := s.paymentStore.UpdateFailed(ctx, p.ID, reason); err != nil {
+			log.Printf("UpdatePayment Failed: failed to update payment_id=%d: %s\n", paymentID, err.Error())
+		}
+	case *payment.UpdatePaymentRequest_ManualAmlCheck_:
+		// No state change; the provider already returned ManualAmlCheck.
 	}
+
+	log.Printf(
+		"UpdatePayment received: payment_id=%d payment_client_id=%s result=%T\n",
+		paymentID, req.Msg.PaymentClientId, req.Msg.Result,
+	)
 
 	return connect.NewResponse(&payment.UpdatePaymentResponse{}), nil
 }
@@ -129,18 +196,106 @@ func (s *ProviderServiceImplementation) UpdatePayment(
 func (s *ProviderServiceImplementation) UpdateLimit(
 	ctx context.Context, req *connect.Request[payment.UpdateLimitRequest],
 ) (*connect.Response[payment.UpdateLimitResponse], error) {
-	// TODO: optionally implement handling of the notifications about updates on your limits and limits usage
+	if s.settlementStore != nil {
+		h := settlement.NewHandler(s.settlementStore, s.settlementNotifier)
+		if err := h.UpdateLimit(ctx, req.Msg); err != nil {
+			log.Printf("UpdateLimit failed: %s\n", err.Error())
+			return nil, err
+		}
+	}
 	return connect.NewResponse(&payment.UpdateLimitResponse{}), nil
 }
 
 func (s *ProviderServiceImplementation) AppendLedgerEntries(
 	ctx context.Context, req *connect.Request[payment.AppendLedgerEntriesRequest],
 ) (*connect.Response[payment.AppendLedgerEntriesResponse], error) {
-	// TODO: optionally implement handling of the notifications about new ledger transactions and new ledger entries
+	if s.settlementStore != nil {
+		h := settlement.NewHandler(s.settlementStore, s.settlementNotifier)
+		if err := h.AppendLedgerEntries(ctx, req.Msg); err != nil {
+			log.Printf("AppendLedgerEntries failed: %s\n", err.Error())
+			return nil, err
+		}
+	}
 	return connect.NewResponse(&payment.AppendLedgerEntriesResponse{}), nil
 }
 
 func (s *ProviderServiceImplementation) ApprovePaymentQuotes(ctx context.Context, c *connect.Request[payment.ApprovePaymentQuoteRequest]) (*connect.Response[payment.ApprovePaymentQuoteResponse], error) {
-	//TODO: this is the endpoint to have a last look at quote and approve after AML check is done
-	return connect.NewResponse(&payment.ApprovePaymentQuoteResponse{}), nil
+	req := c.Msg
+
+	approved := true
+	reason := ""
+
+	if p, err := s.paymentStore.GetByPaymentID(ctx, req.PaymentId); err == nil && p != nil {
+		if s.outsideTolerance(p.PayoutAmount, fromSDKDecimal(req.PayOutAmount)) {
+			approved = false
+			reason = fmt.Sprintf("pay-out amount outside tolerance: stored %v, got %v", p.PayoutAmount, req.PayOutAmount)
+		}
+		if approved && s.outsideTolerance(p.SettlementAmount, fromSDKDecimal(req.SettlementAmount)) {
+			approved = false
+			reason = fmt.Sprintf("settlement amount outside tolerance: stored %v, got %v", p.SettlementAmount, req.SettlementAmount)
+		}
+	} else if err != nil && !errors.Is(err, localpayment.ErrNotFound) {
+		log.Printf("ApprovePaymentQuotes: failed to load payment_id=%d: %s\n", req.PaymentId, err.Error())
+	}
+
+	var resp *payment.ApprovePaymentQuoteResponse
+	if approved {
+		resp = &payment.ApprovePaymentQuoteResponse{
+			Result: &payment.ApprovePaymentQuoteResponse_Accepted_{Accepted: &payment.ApprovePaymentQuoteResponse_Accepted{}},
+		}
+		log.Printf("ApprovePaymentQuotes approved: payment_id=%d\n", req.PaymentId)
+	} else {
+		resp = &payment.ApprovePaymentQuoteResponse{
+			Result: &payment.ApprovePaymentQuoteResponse_Rejected_{Rejected: &payment.ApprovePaymentQuoteResponse_Rejected{}},
+		}
+		log.Printf("ApprovePaymentQuotes rejected: payment_id=%d reason=%s\n", req.PaymentId, reason)
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// outsideTolerance reports whether the actual decimal differs from the expected
+// decimal by more than lastLookTolerance percent. Missing values are ignored.
+func (s *ProviderServiceImplementation) outsideTolerance(expected, actual *localpayment.Decimal) bool {
+	if expected == nil || actual == nil {
+		return false
+	}
+	exp := decimalToFloat64(expected)
+	act := decimalToFloat64(actual)
+	if exp == 0 {
+		return act != 0
+	}
+	return math.Abs(act-exp)/math.Abs(exp)*100 > s.lastLookTolerance
+}
+
+func decimalToFloat64(d *localpayment.Decimal) float64 {
+	if d == nil {
+		return 0
+	}
+	return float64(d.Unscaled) * math.Pow(10, float64(d.Exponent))
+}
+
+func fromSDKDecimal(d *common.Decimal) *localpayment.Decimal {
+	if d == nil {
+		return nil
+	}
+	return &localpayment.Decimal{Unscaled: d.Unscaled, Exponent: d.Exponent}
+}
+
+func methodFromDetails(details *common.PaymentDetails) string {
+	if details == nil {
+		return ""
+	}
+	switch details.Details.(type) {
+	case *common.PaymentDetails_Sepa_:
+		return "PAYMENT_METHOD_TYPE_SEPA"
+	case *common.PaymentDetails_Swift_:
+		return "PAYMENT_METHOD_TYPE_SWIFT"
+	case *common.PaymentDetails_Fps_:
+		return "PAYMENT_METHOD_TYPE_FPS"
+	case *common.PaymentDetails_Ach_:
+		return "PAYMENT_METHOD_TYPE_ACH"
+	default:
+		return ""
+	}
 }

@@ -36,4 +36,5 @@ ngrok.cfg
 
 # Local runtime data
 /data/
+/logs/
 .omo/
