@@ -174,19 +174,60 @@ func CreateUser(
 
 ---
 
-## 七、禁止事项
+## 七、架构分层参考（Clean Architecture）
+
+参考 [bxcodec/go-clean-arch](https://github.com/bxcodec/go-clean-arch) 的 Clean Architecture 实践，本项目当前三层体系与其核心思想对应如下：
+
+```
+Delivery / Handler / CLI / Job  ← 外层，依赖内层
+       │
+  Usecase / Service               ← 业务编排，定义所需接口
+       │
+   Domain / Models                ← 核心业务对象与规则
+       │
+  Repository / Store              ← 接口由 Usecase 定义，具体实现可替换
+```
+
+### 7.1 分层原则
+
+1. **依赖向内**：外层（Handler/Delivery）可以依赖内层（Usecase/Domain），内层**不得**依赖外层。
+2. **接口定义在使用方**：Repository / Store / Client 等接口应由调用它的 Usecase/Service 定义，而不是由实现方定义。
+3. **业务逻辑可独立测试**：Usecase 层单元测试不依赖真实数据库、HTTP 服务或外部 SDK。
+4. **可替换实现**：今天用 SQLite，明天用 Postgres 或 mock，不应影响 Domain/Usecase 代码。
+
+### 7.2 与现有代码的对应关系
+
+| Clean Architecture | 本项目当前位置 | 说明 |
+|-------------------|--------------|------|
+| Domain/Models | `internal/payment/models.go`、`internal/quote/models.go` 等 | 领域对象、状态、值对象 |
+| Usecase/Service | `internal/handler/payment.go` 中的业务编排 | 目前业务逻辑多在 handler，后续复杂业务应抽出独立 Service |
+| Repository | `internal/payment/store.go`、`internal/quote/store.go` 等接口 | 建议接口由使用方（Service/Usecase）拥有 |
+| Delivery | `internal/payment/api.go`、`internal/quoteapi/handlers.go` 等 | HTTP 入口，只做绑定、校验、调用内层 |
+
+### 7.3 实施建议
+
+- **新建功能**优先按 `Domain → Usecase → Repository → Delivery` 顺序思考，但**不要为了分层而分层**。
+- 当某个 handler 中业务代码超过 100 行或涉及多个 store/外部调用时，应考虑抽出 `Service`/`Usecase`。
+- 测试优先覆盖 Usecase/Domain，再用集成测试覆盖 Repository 和 Delivery。
+- 保持 KISS：若功能简单（CRUD + 单次调用），handler 直接调用 store 仍然可接受，不必强行引入 Service 层。
+
+---
+
+## 八、禁止事项
 
 - 不要为了“完整”或“可扩展”而增加不必要的层数。
+- 不要为了 Clean Architecture 而过度抽象，导致简单功能需要跨越多个包。
 - 不要引入生态不成熟或违反 Go 哲学的框架。
 - 不要删除或绕过现有测试。
 - 不要修改与需求无关的代码。
 - 不要留下未验证的假设或未运行的代码。
+- 不要让内层（Domain/Usecase）依赖外层（Repository 的具体实现、HTTP handler、SDK client）。
 
 ---
 
-## 八、生产部署规则
+## 九、生产部署规则
 
-### 8.1 统一使用 systemd 部署
+### 9.1 统一使用 systemd 部署
 
 生产环境必须统一通过 systemd 服务启动，禁止直接运行 `./scripts/deploy-local.sh`（nohup 模式）到生产环境，以避免出现并行进程或端口冲突。
 
@@ -202,14 +243,14 @@ func CreateUser(
 3. 执行 `systemctl daemon-reload && systemctl restart my-provider.service`
 4. 等待服务就绪并运行冒烟测试
 
-### 8.2 服务管理
+### 9.2 服务管理
 
 - 服务文件：`/etc/systemd/system/my-provider.service`
 - 查看状态：`systemctl status my-provider.service`
 - 查看日志：`journalctl -u my-provider.service -f`
 - 停止服务：`./scripts/deploy-local.sh --systemd --stop`
 
-### 8.3 本地开发
+### 9.3 本地开发
 
 本地开发可使用 nohup 模式：
 
@@ -220,6 +261,6 @@ func CreateUser(
 
 ---
 
-## 九、一句话总结
+## 十、一句话总结
 
-> **先想清楚，再写最少且精准的代码；每层输入必须校验，每个功能必须测试；保持 KISS、高内聚、低耦合。**
+> **先想清楚，再写最少且精准的代码；每层输入必须校验，每个功能必须测试；保持 KISS、高内聚、低耦合；分层向内依赖，接口由使用方定义。**
